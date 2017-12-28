@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.RegularExpressions;
 using UnityEngine;
 
@@ -10,24 +11,53 @@ using UnityEngine;
 [RequireComponent(typeof(MeshFilter))]
 [RequireComponent(typeof(MeshRenderer))]
 public class PlantGenerator : MonoBehaviour {
+	/// <summary>
+	/// The axiom, that is, the starting point of the L-System.
+	/// </summary>
+	public string _axiom = "X";
+	/// <summary>
+	/// The set of rules that define the L-System.
+	/// </summary>
+	public List<string> _rules = new List<string> {"F=FF", "X=F[[X]+X]-FX"};
+	public int _numIterations = 1;
+	/// <summary>
+	/// Determines the discrete angle at which L-System rules rotate the object.
+	/// </summary>
+	[Range(0.0f, 90.0f)]
+	public float _rotationAngle = 22.5f;
+	/// <summary>
+	/// Determines the trunk radius at the base of the plant.
+	/// </summary>
+	[Range(0.25f, 4.0f)]
+	public float _maxRadius = 2.0f;
+	/// <summary>
+	/// Determines the number of faces on each segment ring.
+	/// </summary>
+	[Range(3, 32)]
+	public int _faceNumber = 16;
+	/// <summary>
+	/// Controls the factor at which the branch radius decreases with every step.
+	/// </summary>
+	[Range(0.5f, 0.99f)]
+	public float _radiusFactor = 0.9f;
+	/// <summary>
+	/// Sets the length of each branch segment.
+	/// </summary>
+	[Range(0.1f, 2.0f)]
+	public float _segmentLength = 0.5f;
 
-	/// The `axiom` specifies the starting value of the L-System.
-	public string axiom = "F";
-	/// The `rules` container holds a set of L-System rules.
-	public List<string> rules = new List<string> {"F=FF", "X=F[[X]+X]-FX"};
-	/// `iterations` holds the number of L-System iterations.
-	public uint iterations = 5;
-	public string lSystemState = "";
-
+	private MeshFilter _meshFilter;
 	private LSystem<char> _lSystem;
-	private Regex _ruleRegex = new Regex (@"([a-zA-Z])\s*=\s*(\S+)");
+	private Regex _ruleRegex;
+	private float _texCoordUIncrement;
+	private float _angleIncrement;
 
 	/// <summary>
 	/// Reloads the rules specified in this object's serialization to populate the L-System.
 	/// </summary>
 	private void ReloadRules () {
 		_lSystem.ClearRules ();
-		foreach (var rule in rules) {
+		foreach (var rule in _rules) {
 			var match = _ruleRegex.Match (rule);
 			if (match.Success) {
 				var ruleName = match.Groups [1].Value[0];
@@ -38,47 +68,179 @@ public class PlantGenerator : MonoBehaviour {
 					"Expected something like 'A=B+C[D]'.", rule));
 			}
 		}
-		BackupState ();
 	}
-	private void InterpretState () {
-		foreach (var atom in _lSystem.Current) {
-			switch (atom) {
+	private void DrawBranch (ref List<Vertex> vertices, ref List<int> indices, int vertexIndex, Vector3 position, Quaternion orientation, float radius, float texCoordV) {
+		// Create the ring of vertices around the current position.
+		var vertexOffset = Vector3.zero;
+		var texCoord = new Vector2 (0.0f, texCoordV);
+		var angle = 0.0f;
+		for (var i = 0; i <= _faceNumber; i++, angle += _angleIncrement) {
+			vertexOffset.x = radius * Mathf.Cos (angle);
+			vertexOffset.z = radius * Mathf.Sin (angle);
+			vertices.Add (new Vertex (position + orientation * vertexOffset, texCoord));
+			texCoord.x += _texCoordUIncrement;
+		}
+
+		// Applies only after the base of the tree has been created.
+		// Create two triangles for each face that connects the current ring to the last ring of vertices.
+		if (vertexIndex >= 0) {
+			for (var i = vertices.Count - _faceNumber - 1; i < vertices.Count - 1; i++, vertexIndex++) {
+				indices.Add (vertexIndex + 1);
+				indices.Add (vertexIndex);
+				indices.Add (i);
+				indices.Add (i);
+				indices.Add (i + 1);
+				indices.Add (vertexIndex + 1);
+			}
+		}
+	}
+	private void DrawCap (ref List<Vertex> vertices, ref List<int> indices, Vector3 position, Vector2 texCoord) {
+		vertices.Add (new Vertex (position, texCoord + Vector2.one));
+		for (var i = vertices.Count - _faceNumber - 2; i < vertices.Count - 2; i++) {
+			indices.Add (i);
+			indices.Add (vertices.Count - 1);
+			indices.Add (i + 1);
+		}
+	}
+	private int GenerateTreeRecursive (List<char> pattern, int patternIndex, ref List<Vertex> vertices, ref List<int> indices, int vertexIndex, Vector3 position, Quaternion orientation, float radius, float texCoordV) {
+		if (vertexIndex < 0) {
+			DrawBranch (ref vertices, ref indices, vertexIndex, position, orientation, radius, texCoordV);
+			texCoordV += 0.0625f * (_segmentLength + _segmentLength / radius);
+			position += orientation * new Vector3 (0.0f, _segmentLength, 0.0f);
+			vertexIndex = vertices.Count - _faceNumber - 1;
+		}
+
+		int i = 0;
+		for (i = patternIndex; i < pattern.Count; i++) {
+			switch (pattern [i]) {
 			case 'F':
+				DrawBranch (ref vertices, ref indices, vertexIndex, position, orientation, radius, texCoordV);
+				radius *= _radiusFactor;
+				texCoordV += 0.0625f * (_segmentLength + _segmentLength / radius);
+				position += orientation * new Vector3 (0.0f, _segmentLength, 0.0f);
+				vertexIndex = vertices.Count - _faceNumber - 1;
 				break;
+			case 'k':
+				orientation = Quaternion.AngleAxis (_rotationAngle, Vector3.up);
+				break;
+			case 'j':
+				orientation = Quaternion.AngleAxis (-_rotationAngle, Vector3.up);
+				break;
+			case 'l':
+				orientation = Quaternion.AngleAxis (_rotationAngle, Vector3.right);
+				break;
+			case 'h':
+				orientation = Quaternion.AngleAxis (-_rotationAngle, Vector3.right);
+				break;
+			case '+':
+				orientation *= Quaternion.AngleAxis (_rotationAngle, Vector3.forward);
+				break;
+			case '-':
+				orientation *= Quaternion.AngleAxis (-_rotationAngle, Vector3.forward);
+				break;
+			case '[':
+				i = GenerateTreeRecursive (pattern, i + 1, ref vertices, ref indices, vertexIndex, position, orientation, radius, texCoordV) - 1;
+				break;
+			case ']':
+				DrawCap (ref vertices, ref indices, position, new Vector2 (0.0f, texCoordV));
+				return i + 1;
 			default:
 				// Ignore any other symbols.
 				break;
 			}
 		}
-		BackupState ();
+
+		DrawCap (ref vertices, ref indices, position, new Vector2 (0.0f, texCoordV));
+		return i + 1;
 	}
 	/// <summary>
-	/// Copies the state of the L-System such that Unity can serialize it.
+	/// Generates the current L-System iteration as 3D tree, and updates the current object's mesh.
 	/// </summary>
-	private void BackupState () {
-		lSystemState = new string (_lSystem.Current.ToArray ());
-	}
+	private void GenerateTree () {
+		Debug.Log (String.Format ("{0}", new string(_lSystem.Current.ToArray ())));
 
-	void Awake () {
-		if (lSystemState.Length > 0) {
-			_lSystem = new LSystem<char> (new List<char> (lSystemState.ToCharArray()), new List<char> (axiom.ToCharArray()), new Dictionary<char, List<char>> ());
+		// Create the vertex data containers.
+		var vertices = new List<Vertex> ();
+		var indices = new List<int> ();
+
+		// Initialize position, orientation, radius, and the second component of the texture coordinate.
+		var position = Vector3.zero;
+		// var orientation = Quaternion.AngleAxis (90.0f, Vector3.right);
+		var orientation = Quaternion.identity;
+		var radius = _maxRadius;
+		var texCoordV = 0.0f;
+
+		// Generate the tree.
+		GenerateTreeRecursive (_lSystem.Current, 0, ref vertices, ref indices, -1, position, orientation, radius, texCoordV);
+
+		// Calculate the resulting mesh.
+		UpdateMesh (ref vertices, ref indices);
+	}
+	/// <summary>
+	/// Given two vertex data containers, updates the current object's mesh.
+	/// </summary>
+	/// <param name="vertices">Vertex data (position and texture coordinates).</param>
+	/// <param name="indices">Triangle indices.</param>
+	private void UpdateMesh (ref List<Vertex> vertices, ref List<int> indices) {
+		// Start afresh (create or clear the mesh).
+		if (_meshFilter.sharedMesh == null) {
+			_meshFilter.sharedMesh = new Mesh ();
 		} else {
-			_lSystem = new LSystem<char> (new List<char> (axiom.ToCharArray()));
+			_meshFilter.sharedMesh.Clear ();
 		}
 
-		ReloadRules ();
-	}
+		var mesh = _meshFilter.sharedMesh;
 
-	// Use this for initialization
-	void Start () {
+		// Copy over the vertex data.
+		mesh.name = "Procedural Mesh";
+		mesh.vertices = vertices.Select (v => v.position).ToArray ();
+		mesh.uv = vertices.Select (v => v.texCoord).ToArray ();
+		mesh.triangles = indices.ToArray ();
+
+		// Update the other mesh parameters
+		mesh.RecalculateNormals ();
+		mesh.RecalculateBounds ();
 	}
-	
-	// Update is called once per frame
-	void Update () {
-		
+	/// <summary>
+	/// Initialize this MonoBehaviour instance. Is run even if the respective component is inactive.
+	/// </summary>
+	void Awake () {
+		// Find the MeshFilter component.
+		_meshFilter = GetComponent<MeshFilter> ();
+
+		// Initialize the other properties
+		_ruleRegex = new Regex (@"([a-zA-Z])\s*=\s*([-+a-zA-Z[\]]+)");
+		_texCoordUIncrement = 1.0f / (float) _faceNumber;
+		_angleIncrement = 2.0f * Mathf.PI * _texCoordUIncrement;
+
+		// Initialize the actual L-System.
+		_lSystem = new LSystem<char> (new List<char> (_axiom.ToCharArray()));
+
+		ReloadRules ();
+
+		for (var i = 0; i < _numIterations; i++) {
+			_lSystem.MoveNext ();
+		}
+		GenerateTree ();
 	}
 }
+/// <summary>
+/// Simplifies the creation of a single vertex.
+/// </summary>
+class Vertex {
+	public Vector3 position;
+	public Vector2 texCoord;
 
+	/// <summary>
+	/// Initializes a new instance of the <see cref="Vertex"/> class.
+	/// </summary>
+	/// <param name="p">Position.</param>
+	/// <param name="t">Texture coordinates.</param>
+	public Vertex (Vector3 p, Vector2 t) {
+		position = p;
+		texCoord = t;
+	}
+}
 /// <summary>
 /// An implementation of a Lindenmayer System as an IEnumerator.
 /// </summary>
@@ -88,24 +250,13 @@ class LSystem<T> : IEnumerator<List<T>> where T: struct {
 	private Dictionary<T, List<T>> _rules;
 
 	/// <summary>
-	/// Initializes a new instance of the <see cref="LSystem`1"/> class.
-	/// </summary>
-	/// <param name="state">The internal state of the L-System.</param>
-	/// <param name="axiom">The initial starting point of the L-System.</param>
-	/// <param name="rules">The set of rules that are used to evolve the L-System.</param>
-	public LSystem (List<T> state, List<T> axiom, Dictionary<T, List<T>> rules) {
-		_state = state;
-		_axiom = axiom;
-		_rules = rules;
-	}
-	/// <summary>
 	/// Initializes a new instance of the <see cref="LSystem"/> class
 	/// using two parameters.
 	/// </summary>
 	/// <param name="axiom">The initial starting point of the L-System.</param>
 	/// <param name="rules">The set of rules that are used to evolve the L-System.</param>
 	public LSystem (List<T> axiom, Dictionary<T, List<T>> rules) {
-		_state = new List<T> (axiom);
+		_state = new List<T> ();
 		_axiom = axiom;
 		_rules = rules;
 	}
@@ -115,7 +266,7 @@ class LSystem<T> : IEnumerator<List<T>> where T: struct {
 	/// </summary>
 	/// <param name="axiom">The initial starting point of the L-System.</param>
 	public LSystem (List<T> axiom) {
-		_state = new List<T> (axiom);
+		_state = new List<T> ();
 		_axiom = axiom;
 		_rules = new Dictionary<T, List<T>> ();
 	}
@@ -137,24 +288,32 @@ class LSystem<T> : IEnumerator<List<T>> where T: struct {
 	/// Next this instance.
 	/// </summary>
 	public bool MoveNext () {
-		var expanded = false;
-		var i = 0;
-		while (i < _state.Count) {
-			var atom = _state [i];
-			List<T> products;
-			if (_rules.TryGetValue (atom, out products)) {
-				_state.RemoveAt (i);
-				foreach (var product in products) {
-					_state.Insert (i, product);
+		// If the states list is empty, assign the axiom as the first state.
+		if (_state.Count == 0) {
+			_state = new List<T> (_axiom);
+			return true;
+		} else {
+			var nextState = new List<T> (_state);
+			var expanded = false;
+			var i = 0;
+			while (i < nextState.Count) {
+				var atom = nextState [i];
+				List<T> products;
+				if (_rules.TryGetValue (atom, out products)) {
+					nextState.RemoveAt (i);
+					foreach (var product in products) {
+						nextState.Insert (i, product);
+						i += 1;
+					}
+					_state = nextState;
+					expanded = true;
+				} else {
 					i += 1;
 				}
-				expanded = true;
-			} else {
-				i += 1;
 			}
-		}
 
-		return expanded;
+			return expanded;
+		}
 	}
 	/// <summary>
 	/// Provides access to the internal state (i.e. the current string pattern).
@@ -169,7 +328,7 @@ class LSystem<T> : IEnumerator<List<T>> where T: struct {
 	/// Reset this instance such that the internal state matches the originally supplied axiom.
 	/// </summary>
 	public void Reset () {
-		_state = new List<T> (_axiom);
+		_state.Clear ();
 	}
 	/// <summary>
 	/// Implements the IEnumerator interface for the Current property.
