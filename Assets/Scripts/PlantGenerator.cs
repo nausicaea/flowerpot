@@ -10,6 +10,7 @@ using UnityEngine;
 /// </summary>
 [RequireComponent(typeof(MeshFilter))]
 [RequireComponent(typeof(MeshRenderer))]
+[ExecuteInEditMode]
 public class PlantGenerator : MonoBehaviour {
 	/// <summary>
 	/// The axiom, that is, the starting point of the L-System.
@@ -19,6 +20,10 @@ public class PlantGenerator : MonoBehaviour {
 	/// The set of rules that define the L-System.
 	/// </summary>
 	public List<string> _rules = new List<string> {"F=FF", "X=F[[X]+X]-FX"};
+	/// <summary>
+	/// Determines the number of L-System iterations.
+	/// </summary>
+	[Range(0, 10)]
 	public int _numIterations = 1;
 	/// <summary>
 	/// Determines the discrete angle at which L-System rules rotate the object.
@@ -105,8 +110,6 @@ public class PlantGenerator : MonoBehaviour {
 	private int GenerateTreeRecursive (List<char> pattern, int patternIndex, ref List<Vertex> vertices, ref List<int> indices, int vertexIndex, Vector3 position, Quaternion orientation, float radius, float texCoordV) {
 		if (vertexIndex < 0) {
 			DrawBranch (ref vertices, ref indices, vertexIndex, position, orientation, radius, texCoordV);
-			texCoordV += 0.0625f * (_segmentLength + _segmentLength / radius);
-			position += orientation * new Vector3 (0.0f, _segmentLength, 0.0f);
 			vertexIndex = vertices.Count - _faceNumber - 1;
 		}
 
@@ -114,23 +117,11 @@ public class PlantGenerator : MonoBehaviour {
 		for (i = patternIndex; i < pattern.Count; i++) {
 			switch (pattern [i]) {
 			case 'F':
-				DrawBranch (ref vertices, ref indices, vertexIndex, position, orientation, radius, texCoordV);
 				radius *= _radiusFactor;
 				texCoordV += 0.0625f * (_segmentLength + _segmentLength / radius);
-				position += orientation * new Vector3 (0.0f, _segmentLength, 0.0f);
+				position += _segmentLength * (orientation * new Vector3 (0.0f, 1.0f, 0.0f));
+				DrawBranch (ref vertices, ref indices, vertexIndex, position, orientation, radius, texCoordV);
 				vertexIndex = vertices.Count - _faceNumber - 1;
-				break;
-			case 'k':
-				orientation = Quaternion.AngleAxis (_rotationAngle, Vector3.up);
-				break;
-			case 'j':
-				orientation = Quaternion.AngleAxis (-_rotationAngle, Vector3.up);
-				break;
-			case 'l':
-				orientation = Quaternion.AngleAxis (_rotationAngle, Vector3.right);
-				break;
-			case 'h':
-				orientation = Quaternion.AngleAxis (-_rotationAngle, Vector3.right);
 				break;
 			case '+':
 				orientation *= Quaternion.AngleAxis (_rotationAngle, Vector3.forward);
@@ -149,7 +140,7 @@ public class PlantGenerator : MonoBehaviour {
 				break;
 			}
 		}
-
+			
 		DrawCap (ref vertices, ref indices, position, new Vector2 (0.0f, texCoordV));
 		return i + 1;
 	}
@@ -218,7 +209,7 @@ public class PlantGenerator : MonoBehaviour {
 
 		ReloadRules ();
 
-		for (var i = 0; i < _numIterations; i++) {
+		for (var i = 0; i <= _numIterations; i++) {
 			_lSystem.MoveNext ();
 		}
 		GenerateTree ();
@@ -249,17 +240,6 @@ class LSystem<T> : IEnumerator<List<T>> where T: struct {
 	private List<T> _axiom;
 	private Dictionary<T, List<T>> _rules;
 
-	/// <summary>
-	/// Initializes a new instance of the <see cref="LSystem"/> class
-	/// using two parameters.
-	/// </summary>
-	/// <param name="axiom">The initial starting point of the L-System.</param>
-	/// <param name="rules">The set of rules that are used to evolve the L-System.</param>
-	public LSystem (List<T> axiom, Dictionary<T, List<T>> rules) {
-		_state = new List<T> ();
-		_axiom = axiom;
-		_rules = rules;
-	}
 	/// <summary>
 	/// Initializes a new instance of the <see cref="LSystem"/> class
 	/// with an empty ruleset.
