@@ -26,15 +26,20 @@ public class PlantGenerator : MonoBehaviour {
 	[Range(0, 10)]
 	public int _numIterations = 1;
 	/// <summary>
-	/// Determines the discrete angle at which L-System rules rotate the object.
+	/// Determines the quantized rotation angle for each rotation operation.
 	/// </summary>
 	[Range(0.0f, 90.0f)]
 	public float _rotationAngle = 22.5f;
 	/// <summary>
+	/// Determines the factor with which the rotation angle is randomly skewed.
+	/// </summary>
+	[Range(0.0f, 20.0f)]
+	public float _rotationUncertainty = 6.0f;
+	/// <summary>
 	/// Determines the trunk radius at the base of the plant.
 	/// </summary>
-	[Range(0.25f, 4.0f)]
-	public float _maxRadius = 2.0f;
+	[Range(0.01f, 4.0f)]
+	public float _baseRadius = 2.0f;
 	/// <summary>
 	/// Determines the number of faces on each segment ring.
 	/// </summary>
@@ -44,7 +49,7 @@ public class PlantGenerator : MonoBehaviour {
 	/// Controls the factor at which the branch radius decreases with every step.
 	/// </summary>
 	[Range(0.5f, 0.99f)]
-	public float _radiusFactor = 0.9f;
+	public float _radiusDecrease = 0.9f;
 	/// <summary>
 	/// Sets the length of each branch segment.
 	/// </summary>
@@ -53,10 +58,19 @@ public class PlantGenerator : MonoBehaviour {
 
 	private MeshFilter _meshFilter;
 	private LSystem<char> _lSystem;
-	private Regex _ruleRegex;
+	private Regex _ruleRegex = new Regex (@"([a-zA-Z])\s*=\s*([-+a-zA-Z[\]]+)");
 	private float _texCoordUIncrement;
 	private float _angleIncrement;
 
+	/// <summary>
+	/// Gets the randomized angle.
+	/// </summary>
+	/// <value>The randomized angle.</value>
+	private float RandomizedAngle {
+		get {
+			return _rotationAngle + _rotationUncertainty * (UnityEngine.Random.value - 0.5f);
+		}
+	}
 	/// <summary>
 	/// Reloads the rules specified in this object's serialization to populate the L-System.
 	/// </summary>
@@ -74,7 +88,18 @@ public class PlantGenerator : MonoBehaviour {
 			}
 		}
 	}
-	private void DrawBranch (ref List<Vertex> vertices, ref List<int> indices, int vertexIndex, Vector3 position, Quaternion orientation, float radius, float texCoordV) {
+	/// <summary>
+	/// Draws the branch.
+	/// </summary>
+	/// <returns>The branch.</returns>
+	/// <param name="vertices">Vertices.</param>
+	/// <param name="indices">Indices.</param>
+	/// <param name="vertexIndex">Vertex index.</param>
+	/// <param name="position">Position.</param>
+	/// <param name="orientation">Orientation.</param>
+	/// <param name="radius">Radius.</param>
+	/// <param name="texCoordV">Tex coordinate v.</param>
+	private int DrawBranch (ref List<Vertex> vertices, ref List<int> indices, int vertexIndex, Vector3 position, Quaternion orientation, float radius, float texCoordV) {
 		// Create the ring of vertices around the current position.
 		var vertexOffset = Vector3.zero;
 		var texCoord = new Vector2 (0.0f, texCoordV);
@@ -98,7 +123,16 @@ public class PlantGenerator : MonoBehaviour {
 				indices.Add (vertexIndex + 1);
 			}
 		}
+
+		return vertices.Count - _faceNumber - 1;
 	}
+	/// <summary>
+	/// Draws the branch cap.
+	/// </summary>
+	/// <param name="vertices">Vertices.</param>
+	/// <param name="indices">Indices.</param>
+	/// <param name="position">Position.</param>
+	/// <param name="texCoord">Tex coordinate.</param>
 	private void DrawCap (ref List<Vertex> vertices, ref List<int> indices, Vector3 position, Vector2 texCoord) {
 		vertices.Add (new Vertex (position, texCoord + Vector2.one));
 		for (var i = vertices.Count - _faceNumber - 2; i < vertices.Count - 2; i++) {
@@ -107,27 +141,50 @@ public class PlantGenerator : MonoBehaviour {
 			indices.Add (i + 1);
 		}
 	}
+	/// <summary>
+	/// Recursively generates the procedural tree.
+	/// </summary>
+	/// <returns>The tree recursive.</returns>
+	/// <param name="pattern">Pattern.</param>
+	/// <param name="patternIndex">Pattern index.</param>
+	/// <param name="vertices">Vertices.</param>
+	/// <param name="indices">Indices.</param>
+	/// <param name="vertexIndex">Vertex index.</param>
+	/// <param name="position">Position.</param>
+	/// <param name="orientation">Orientation.</param>
+	/// <param name="radius">Radius.</param>
+	/// <param name="texCoordV">Tex coordinate v.</param>
 	private int GenerateTreeRecursive (List<char> pattern, int patternIndex, ref List<Vertex> vertices, ref List<int> indices, int vertexIndex, Vector3 position, Quaternion orientation, float radius, float texCoordV) {
 		if (vertexIndex < 0) {
-			DrawBranch (ref vertices, ref indices, vertexIndex, position, orientation, radius, texCoordV);
-			vertexIndex = vertices.Count - _faceNumber - 1;
+			vertexIndex = DrawBranch (ref vertices, ref indices, vertexIndex, position, orientation, radius, texCoordV);
 		}
 
 		int i = 0;
 		for (i = patternIndex; i < pattern.Count; i++) {
 			switch (pattern [i]) {
 			case 'F':
-				radius *= _radiusFactor;
+				radius *= _radiusDecrease;
 				texCoordV += 0.0625f * (_segmentLength + _segmentLength / radius);
 				position += _segmentLength * (orientation * new Vector3 (0.0f, 1.0f, 0.0f));
-				DrawBranch (ref vertices, ref indices, vertexIndex, position, orientation, radius, texCoordV);
-				vertexIndex = vertices.Count - _faceNumber - 1;
+				vertexIndex = DrawBranch (ref vertices, ref indices, vertexIndex, position, orientation, radius, texCoordV);
 				break;
 			case '+':
-				orientation *= Quaternion.AngleAxis (_rotationAngle, Vector3.forward);
+				orientation *= Quaternion.AngleAxis (RandomizedAngle, Vector3.right);
 				break;
 			case '-':
-				orientation *= Quaternion.AngleAxis (-_rotationAngle, Vector3.forward);
+				orientation *= Quaternion.AngleAxis (-RandomizedAngle, Vector3.right);
+				break;
+			case 'a':
+				orientation *= Quaternion.AngleAxis (RandomizedAngle, Vector3.up);
+				break;
+			case 'c':
+				orientation *= Quaternion.AngleAxis (-RandomizedAngle, Vector3.up);
+				break;
+			case 'l':
+				orientation *= Quaternion.AngleAxis (RandomizedAngle, Vector3.forward);
+				break;
+			case 'r':
+				orientation *= Quaternion.AngleAxis (-RandomizedAngle, Vector3.forward);
 				break;
 			case '[':
 				i = GenerateTreeRecursive (pattern, i + 1, ref vertices, ref indices, vertexIndex, position, orientation, radius, texCoordV) - 1;
@@ -158,7 +215,7 @@ public class PlantGenerator : MonoBehaviour {
 		var position = Vector3.zero;
 		// var orientation = Quaternion.AngleAxis (90.0f, Vector3.right);
 		var orientation = Quaternion.identity;
-		var radius = _maxRadius;
+		var radius = _baseRadius;
 		var texCoordV = 0.0f;
 
 		// Generate the tree.
@@ -192,6 +249,16 @@ public class PlantGenerator : MonoBehaviour {
 		mesh.RecalculateNormals ();
 		mesh.RecalculateBounds ();
 	}
+	void UpdateParameters () {
+		// Initialize the other properties
+		_texCoordUIncrement = 1.0f / (float) _faceNumber;
+		_angleIncrement = 2.0f * Mathf.PI * _texCoordUIncrement;
+		ReloadRules ();
+		_lSystem.Reset ();
+		for (var i = 0; i <= _numIterations; i++) {
+			_lSystem.MoveNext ();
+		}
+	}
 	/// <summary>
 	/// Initialize this MonoBehaviour instance. Is run even if the respective component is inactive.
 	/// </summary>
@@ -199,20 +266,20 @@ public class PlantGenerator : MonoBehaviour {
 		// Find the MeshFilter component.
 		_meshFilter = GetComponent<MeshFilter> ();
 
-		// Initialize the other properties
-		_ruleRegex = new Regex (@"([a-zA-Z])\s*=\s*([-+a-zA-Z[\]]+)");
-		_texCoordUIncrement = 1.0f / (float) _faceNumber;
-		_angleIncrement = 2.0f * Mathf.PI * _texCoordUIncrement;
-
 		// Initialize the actual L-System.
 		_lSystem = new LSystem<char> (new List<char> (_axiom.ToCharArray()));
 
-		ReloadRules ();
-
-		for (var i = 0; i <= _numIterations; i++) {
-			_lSystem.MoveNext ();
-		}
+		UpdateParameters ();
 		GenerateTree ();
+	}
+	/// <summary>
+	/// Re-generate the tree, if inspector parameters are changed from within the editor.
+	/// </summary>
+	void OnValidate () {
+		if (_meshFilter != null && _lSystem != null) {
+			UpdateParameters ();
+			GenerateTree ();
+		}
 	}
 }
 /// <summary>
