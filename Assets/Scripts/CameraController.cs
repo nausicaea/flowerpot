@@ -27,7 +27,7 @@ namespace AssemblyCSharp
         /// Determines the offset from the target's bounding box center
         /// on the basis of which the camera rotation center is chosen. 
         /// </summary>
-        public Vector3 centerOffset = new Vector3(0.0f, -2.0f, 0.0f);
+        public Vector3 centerOffset;
         /// <summary>
         /// The target.
         /// </summary>

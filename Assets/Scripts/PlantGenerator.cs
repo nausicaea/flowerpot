@@ -96,12 +96,12 @@ namespace AssemblyCSharp
         /// Determines the trunk radius at the base of the plant.
         /// </summary>
         [Range(0.01f, 4.0f)]
-        public float baseRadius = 2.0f;
+        public float baseRadius = 0.05f;
         /// <summary>
         /// Determines the number of faces on each segment ring.
         /// </summary>
         [Range(3, 32)]
-        public int faceNumber = 16;
+        public int faceNumber = 8;
         /// <summary>
         /// Controls the factor at which the branch radius decreases with every step.
         /// </summary>
@@ -111,7 +111,7 @@ namespace AssemblyCSharp
         /// Sets the length of each branch segment.
         /// </summary>
         [Range(0.1f, 2.0f)]
-        public float segmentLength = 0.5f;
+        public float segmentLength = 0.2f;
 
         MeshFilter meshFilter;
         LSystem<char> lSystem;
@@ -139,15 +139,23 @@ namespace AssemblyCSharp
         void ReloadRules()
         {
             this.lSystem.ClearRules();
-            foreach (var rule in this.rules)
+            foreach (string rule in this.rules)
             {
                 var match = ruleRegex.Match(rule);
                 if (match.Success)
                 {
+                    // Determine the symbol to which the rule(s) will be assigned.
                     var ruleName = match.Groups[1].Value[0];
-                    var ruleValue = new List<char>(match.Groups[2].Value.ToCharArray());
-                    Debug.Log(String.Format("Additional rules: {1} (found {0} Groups)", match.Groups.Count, match.Groups[3].Captures.Count));
-                    this.lSystem.InsertRule(ruleName, ruleValue);
+
+                    // Retrieve all rules.
+                    var ruleValues = new List<List<char>>();
+                    ruleValues.Add(new List<char> (match.Groups[2].Value.ToCharArray()));
+                    foreach (Capture ruleValueAdditional in match.Groups[4].Captures) {
+                        ruleValues.Add(new List<char>(ruleValueAdditional.Value.ToCharArray()));
+                    }
+
+                    // Insert the resulting rules.
+                    this.lSystem.InsertRule(ruleName, ruleValues);
                 }
                 else
                 {
@@ -274,9 +282,6 @@ namespace AssemblyCSharp
                     case ']':
                         this.DrawCap(ref vertices, ref indices, position, new Vector2(0.0f, texCoordV));
                         return i + 1;
-                    default:
-				// Ignore any other symbols.
-                        break;
                 }
             }
 			
@@ -359,7 +364,7 @@ namespace AssemblyCSharp
 
             // Initialize the actual L-System.
             this.lSystem = new LSystem<char>(new List<char>(this.axiom.ToCharArray()));
-            this.ruleRegex = new Regex(@"([a-zA-Z])\s*=\s*([-+a-zA-Z[\]]+)(?!,\s*([-+a-zA-Z[\]]+))*");
+            this.ruleRegex = new Regex(@"([a-zA-Z])\s*=\s*([-+a-zA-Z[\]]+)(\s*,\s*([-+a-zA-Z[\]]+))*");
 
             this.UpdateParameters();
             this.GenerateTree();
@@ -400,12 +405,15 @@ namespace AssemblyCSharp
 
     /// <summary>
     /// An implementation of a Lindenmayer System as an IEnumerator.
+    /// Includes stochastic rules: if multiple replacements (i.e. products) are specified
+    /// for a particular symbol, one is chosen at random.
     /// </summary>
     class LSystem<T> : IEnumerator<List<T>> where T: struct
     {
         List<T> state;
         List<T> axiom;
-        Dictionary<T, List<T>> rules;
+        Dictionary<T, List<List<T>>> rules;
+        System.Random rng;
 
         /// <summary>
         /// Initializes a new instance with an empty state and ruleset.
@@ -415,17 +423,31 @@ namespace AssemblyCSharp
         {
             this.state = new List<T>();
             this.axiom = axiom;
-            this.rules = new Dictionary<T, List<T>>();
+            this.rules = new Dictionary<T, List<List<T>>>();
+            this.rng = new System.Random();
         }
 
         /// <summary>
-        /// Inserts the specified rule.
+        /// Randomly chooses one element of the supplied list.
+        /// Assumes that the list is not empty.
+        /// </summary>
+        /// <returns>The random choice.</returns>
+        /// <param name="choices">A list of possible choices.</param>
+        List<T> RandomChoice(List<List<T>> choices)
+        {
+            var i = this.rng.Next(choices.Count);
+            return choices[i];
+        }
+
+        /// <summary>
+        /// Inserts the specified rule. Note that when expanding the rules,
+        /// one of the productions is chosen at random.
         /// </summary>
         /// <param name="symbol">Symbol.</param>
-        /// <param name="production">Production.</param>
-        public void InsertRule(T symbol, List<T> production)
+        /// <param name="productions">Productions (i.e. a list of symbol replacements).</param>
+        public void InsertRule(T symbol, List<List<T>> productions)
         {
-            this.rules.Add(symbol, production);
+            this.rules.Add(symbol, productions);
         }
 
         /// <summary>
@@ -438,6 +460,9 @@ namespace AssemblyCSharp
 
         /// <summary>
         /// Increment the current state of the instance by applying rule replacements.
+        /// Stops the iteration by returning false, once the state does not expand any further.
+        /// Note that if multiple replacement rules (i.e. productions) are specified for a 
+        /// particular symbol, one is chosen at random.
         /// </summary>
         public bool MoveNext()
         {
@@ -447,21 +472,29 @@ namespace AssemblyCSharp
                 this.state = new List<T>(this.axiom);
                 return true;
             }
+            // Otherwise, apply the replacement rules to expand the current state
+            // into the next one.
             else
             {
+                // Copy the current state to the next state.
                 var nextState = new List<T>(this.state);
                 var expanded = false;
+
+                // Iterate through all elements of the state (i.e. symbols).
                 var i = 0;
                 while (i < nextState.Count)
                 {
-                    var atom = nextState[i];
-                    List<T> products;
-                    if (this.rules.TryGetValue(atom, out products))
+                    // If the current symbol is represented within the ruleset,
+                    // replace it with a random choice of the available rules
+                    // for the specified symbol.
+                    List<List<T>> products;
+                    if (this.rules.TryGetValue(nextState[i], out products))
                     {
+                        var product = this.RandomChoice(products);
                         nextState.RemoveAt(i);
-                        foreach (var product in products)
+                        foreach (T symbol in product)
                         {
-                            nextState.Insert(i, product);
+                            nextState.Insert(i, symbol);
                             i += 1;
                         }
                         this.state = nextState;
