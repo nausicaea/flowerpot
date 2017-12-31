@@ -10,15 +10,27 @@ namespace AssemblyCSharp
         /// <summary>
         /// Determines the smalles valid field of view.
         /// </summary>
+        [Range(1.0f, 90.0f)]
         public float minFov = 15.0f;
         /// <summary>
         /// Determines the largest valid field of view.
         /// </summary>
+        [Range(1.0f, 90.0f)]
         public float maxFov = 90.0f;
+        /// <summary>
+        /// Selects the mouse button that activates camera rotation.
+        /// </summary>
+        public int mouseButton = 0;
         /// <summary>
         /// Specifies the mouse-wheel sensitivity.
         /// </summary>
+        [Range(0.0f, 20.0f)]
         public float wheelSensitivity = 10.0f;
+        /// <summary>
+        /// Specifies the mouse sensitivity (x and y axes).
+        /// </summary>
+        [Range(0.001f, 1.0f)]
+        public float mouseSensitivity = 1.0f;
         /// <summary>
         /// Determines the camera rotation speed.
         /// </summary>
@@ -35,14 +47,16 @@ namespace AssemblyCSharp
 
         Camera cameraComponent;
         Renderer targetRenderer;
+        bool mouseButtonDown;
 
         /// <summary>
-        /// Obtains a reference to the <see cref="Camera"/>.
+        /// Obtains a reference to the <see cref="Camera"/> and the target <see cref="Renderer"/>.
         /// </summary>
         void Awake()
         {
-            this.cameraComponent = this.GetComponent<Camera>();
+            this.cameraComponent = this.GetComponentInChildren<Camera>();
             this.targetRenderer = this.target.GetComponent<Renderer>();
+            this.mouseButtonDown = false;
         }
 
         /// <summary>
@@ -50,13 +64,16 @@ namespace AssemblyCSharp
         /// </summary>
         void Start()
         {
-            this.cameraComponent.transform.LookAt(this.targetRenderer.bounds.center + this.centerOffset);
+            if (this.targetRenderer != null)
+            {
+                this.cameraComponent.transform.LookAt(this.targetRenderer.bounds.center + this.centerOffset);
+            }
         }
 
         /// <summary>
-        /// Update this instance.
+        /// Handles camera zoom and rotation around the target object.
         /// </summary>
-        void Update()
+        void LateUpdate()
         {
             // Allow the player to zoom the camera.
             var fieldOfView = this.cameraComponent.fieldOfView;
@@ -64,50 +81,45 @@ namespace AssemblyCSharp
             fieldOfView = Mathf.Clamp(fieldOfView, this.minFov, this.maxFov);
             this.cameraComponent.fieldOfView = fieldOfView;
 
-            // Rotate around the target object.
-            this.cameraComponent.transform.RotateAround(this.targetRenderer.bounds.center + this.centerOffset, Vector3.up, this.rotationSpeed * Time.deltaTime);
+            if (this.target != null)
+            {
+                // Determine if the mouse button is being held down.
+                if (Input.GetMouseButtonDown(this.mouseButton))
+                {
+                    this.mouseButtonDown = true;
+                }
+                else if (Input.GetMouseButtonUp(this.mouseButton))
+                {
+                    this.mouseButtonDown = false;
+                }
 
-            // If the first mouse button is held down.
-//            if (Input.GetMouseButton(0))
-//            {
-//                var ray = camera.ScreenPointToRay(Input.mousePosition);
-//
-//                // If an object was hit
-//                RaycastHit hit;
-//                if (Physics.Raycast(ray, out hit))
-//                {
-//                    if (!_dragActive)
-//                    {
-//                        _vDown = hit.point - camera.transform.position;
-//                        _dragActive = true;
-//                    }
-//                    else
-//                    {
-//                        _vDrag = hit.point - camera.transform.position;
-//                        _rotationAxis = Vector3.Cross(_vDown, _vDrag);
-//                        _angularVelocity = Vector3.Angle(_vDown, _vDrag) * _mouseSensitivity;
-//                    }
-//                }
-//                else
-//                {
-//                    _dragActive = false;
-//                }
-//            }
-//
-//            if (Input.GetMouseButtonUp(0))
-//            {
-//                _dragActive = false;
-//            }
-//
-//            if (_angularVelocity > 0)
-//            {
-//                camera.transform.RotateAround(_targetRenderer.bounds.center + _centerOffset, _rotationAxis, _angularVelocity * Time.deltaTime);
-//                _angularVelocity = (_angularVelocity > _epsilon) ? _angularVelocity * _damping : 0.0f;
-//            }
-//            else
-//            {
-//                // _camera.transform.RotateAround (_targetRenderer.bounds.center + _centerOffset, Vector3.up, _rotationSpeed * Time.deltaTime);
-//            }
+                // If the mouse button is being held down,
+                // allow the player to rotate the camera around the target object.
+                // The y-axis of the camera is restricted to the world y-axis.
+                // If the mouse button is not being held down, slowly rotate
+                // around the target.
+                if (this.mouseButtonDown)
+                {
+                    this.cameraComponent.transform.RotateAround(
+                        this.target.transform.position, 
+                        Vector3.up, 
+                        3.0f * this.mouseSensitivity * Input.GetAxis("Mouse X")
+                    );
+                    this.cameraComponent.transform.RotateAround(
+                        this.target.transform.position, 
+                        this.cameraComponent.transform.right, 
+                        -3.0f * this.mouseSensitivity * Input.GetAxis("Mouse Y")
+                    );
+                }
+                else
+                {
+                    this.cameraComponent.transform.RotateAround(
+                        this.target.transform.position, 
+                        Vector3.up, 
+                        this.rotationSpeed * Time.deltaTime
+                    );
+                }
+            }
         }
     }
 }
