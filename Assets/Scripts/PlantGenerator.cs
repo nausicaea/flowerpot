@@ -76,12 +76,13 @@ namespace AssemblyCSharp
         /// <summary>
         /// The set of rules that define the L-System.
         /// </summary>
-        public List<string> rules = new List<string> { "F=FF", "X=F[[X]+X]-FX" };
+        public List<string> rules = new List<string> { "X=F[-XF][+XF][lXF][rXF],F[-FX][+FX][lFX][rFX]" };
         /// <summary>
-        /// Determines the number of L-System iterations.
+        /// Determines the number of L-System iterations. Its fractional part 
+        /// determines the length of the end of branch segments.
         /// </summary>
-        [Range(0, 10)]
-        public int numIterations = 1;
+        [Range(0.0f, 10.0f)]
+        public float numIterations = 1.0f;
         /// <summary>
         /// Determines the quantized rotation angle for each rotation operation.
         /// </summary>
@@ -98,15 +99,15 @@ namespace AssemblyCSharp
         [Range(0.01f, 4.0f)]
         public float baseRadius = 0.05f;
         /// <summary>
-        /// Determines the number of faces on each segment ring.
-        /// </summary>
-        [Range(3, 32)]
-        public int faceNumber = 8;
-        /// <summary>
         /// Controls the factor at which the branch radius decreases with every step.
         /// </summary>
         [Range(0.5f, 0.99f)]
         public float radiusDecrease = 0.9f;
+        /// <summary>
+        /// Determines the number of faces on each segment ring.
+        /// </summary>
+        [Range(3, 32)]
+        public int faceNumber = 8;
         /// <summary>
         /// Sets the length of each branch segment.
         /// </summary>
@@ -115,7 +116,7 @@ namespace AssemblyCSharp
 
         MeshFilter meshFilter;
         LSystem<char> lSystem;
-        Regex ruleRegex;
+        Regex ruleRegex = new Regex(@"([a-zA-Z])\s*=\s*([-+a-zA-Z[\]]+)(\s*,\s*([-+a-zA-Z[\]]+))*");
         float texCoordUIncrement;
         float angleIncrement;
 
@@ -205,8 +206,11 @@ namespace AssemblyCSharp
                 }
             }
 
+            // Always draw a branch cap (I know, I know...).
+            this.DrawCap(ref vertices, ref indices, position, texCoord);
+
             // Return the next vertex index.
-            return vertices.Count - this.faceNumber - 1;
+            return vertices.Count - this.faceNumber - 2;
         }
 
         /// <summary>
@@ -253,9 +257,9 @@ namespace AssemblyCSharp
                 switch (pattern[i])
                 {
                     case 'F':
+                        position += this.segmentLength * (orientation * Vector3.up);
                         radius *= this.radiusDecrease;
                         texCoordV += 0.0625f * this.segmentLength * (1.0f + 1.0f / radius);
-                        position += this.segmentLength * (orientation * new Vector3(0.0f, 1.0f, 0.0f));
                         vertexIndex = this.DrawBranch(ref vertices, ref indices, vertexIndex, position, orientation, radius, texCoordV);
                         break;
                     case '+':
@@ -280,12 +284,10 @@ namespace AssemblyCSharp
                         i = this.GenerateTreeRecursive(pattern, i + 1, ref vertices, ref indices, vertexIndex, position, orientation, radius, texCoordV) - 1;
                         break;
                     case ']':
-                        this.DrawCap(ref vertices, ref indices, position, new Vector2(0.0f, texCoordV));
                         return i + 1;
                 }
             }
 			
-            this.DrawCap(ref vertices, ref indices, position, new Vector2(0.0f, texCoordV));
             return i + 1;
         }
 
@@ -346,9 +348,12 @@ namespace AssemblyCSharp
             // Initialize the other properties
             this.texCoordUIncrement = 1.0f / (float)this.faceNumber;
             this.angleIncrement = 2.0f * Mathf.PI * this.texCoordUIncrement;
+            this.lSystem.axiom = new List<char>(this.axiom.ToCharArray());
             this.ReloadRules();
             this.lSystem.Reset();
-            for (var i = 0; i <= this.numIterations; i++)
+            // Move the iterator to the first element, i.e. the axiom.
+            this.lSystem.MoveNext();
+            for (var i = 0; i < (int)Mathf.Floor(this.numIterations); i++)
             {
                 this.lSystem.MoveNext();
             }
@@ -364,7 +369,6 @@ namespace AssemblyCSharp
 
             // Initialize the actual L-System.
             this.lSystem = new LSystem<char>(new List<char>(this.axiom.ToCharArray()));
-            this.ruleRegex = new Regex(@"([a-zA-Z])\s*=\s*([-+a-zA-Z[\]]+)(\s*,\s*([-+a-zA-Z[\]]+))*");
 
             this.UpdateParameters();
             this.GenerateTree();
@@ -411,7 +415,7 @@ namespace AssemblyCSharp
     class LSystem<T> : IEnumerator<List<T>> where T: struct
     {
         List<T> state;
-        List<T> axiom;
+        public List<T> axiom;
         Dictionary<T, List<List<T>>> rules;
         System.Random rng;
 
