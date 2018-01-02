@@ -15,3 +15,15 @@ Additional nice-looking examples are:
 The `PlantGenerator` class exposes additional variables that allow the
 modification of the plant base radius, the degree of rotation for every
 rotation operation, etc. refer to the documentation within the code.
+
+# Trying it out yourself
+
+Make sure to clone the repository via git and git-lfs (git large file storage).
+Git-lfs is necessary due to git's poor handling of binary files.
+
+    $ git clone https://github.com/nausicaea/flowerpot.git
+    $ cd flowerpot
+    $ git lfs pull
+
+Then, you should be able to open the project in Unity. Load the Scene file
+`Main.unity` to get the test environment.
